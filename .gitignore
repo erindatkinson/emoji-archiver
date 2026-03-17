@@ -62,6 +62,7 @@ target/
 
 # Ignore environment variable file
 .env
+.config.yaml
 
 # Ignore OS specific cruft
 .DS_Store

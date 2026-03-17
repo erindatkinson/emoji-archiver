@@ -25,18 +25,18 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	initConfig()
+	rootCmd.PersistentFlags().StringVarP(&browser, "browser", "b", utilities.ConfigOrEnv("slack", "browser"), "browser to look for token")
+	rootCmd.PersistentFlags().StringVarP(&profile, "profile", "p", utilities.ConfigOrEnv("slack", "profile"), "profile to look for token")
+	rootCmd.PersistentFlags().StringVarP(&subdomain, "subdomain", "s", utilities.ConfigOrEnv("slack", "subdomain"), "what subdomain to pull a slack token for")
 }
 
-// initConfig reads in config file and ENV variables if set.
+// initConfig reads in config file
 func initConfig() {
-	viper.SetEnvPrefix("slack")
-
-	for _, env := range utilities.Envs {
-		viper.BindEnv(env)
-	}
-
-	viper.SetDefault("concurrency", "1")
-	viper.AutomaticEnv() // read in environment variables that match
-
+	viper.SetConfigName(".config")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("/etc/slack-emojinator/")
+	viper.AddConfigPath("$HOME/.emojinator")
+	viper.AddConfigPath(".")
+	viper.ReadInConfig()
 }

@@ -2,55 +2,21 @@ package utilities
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
-var Envs []string = []string{
-	"team",
-	"cookie",
-	"token",
-	"concurrency",
-}
-
-var OptionalEnvs []string = []string{
-	"release-channel",
-}
-
-func CheckEnvs() error {
-	errors := []string{}
-
-	for _, env := range Envs {
-		if viper.Get(env) == nil {
-			errors = append(
-				errors,
-				strings.ToUpper(
-					fmt.Sprintf(
-						"%s_%s",
-						viper.GetEnvPrefix(),
-						strings.ReplaceAll(env, "-", "_"))))
-		}
+func ConfigOrEnv(prefix, key string) string {
+	settings := viper.GetStringMapString(prefix)
+	val, ok := settings[key]
+	if !ok {
+		val, _ = os.LookupEnv(
+			fmt.Sprintf("%s_%s", strings.ToUpper(prefix), strings.ToUpper(key)))
 	}
-
-	if len(errors) != 0 {
-		return fmt.Errorf("envs required: [%s]", strings.Join(errors, ", "))
-	}
-
-	for _, env := range OptionalEnvs {
-		if viper.Get(env) == nil {
-			errors = append(
-				errors,
-				strings.ToUpper(
-					fmt.Sprintf(
-						"%s_%s",
-						viper.GetEnvPrefix(),
-						strings.ReplaceAll(env, "-", "_"))))
-		}
-	}
-
-	return nil
+	return val
 }
 
 func PflagToBool(value pflag.Value) bool {

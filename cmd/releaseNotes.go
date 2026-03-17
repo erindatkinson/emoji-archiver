@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/erindatkinson/slack-emojinator/internal/slack"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -28,14 +28,12 @@ var releaseNotesCmd = &cobra.Command{
 	Short: "Generate and publish release notes",
 
 	Run: func(cmd *cobra.Command, args []string) {
-		channel := viper.GetString("release_channel")
-		team := viper.GetString("team")
-		logger := utilities.NewLogger("info", "team", team)
-
-		client := slack.NewSlackClient(
-			team,
-			viper.GetString("token"),
-			viper.GetString("cookie"))
+		if browser == "" || profile == "" || subdomain == "" {
+			slog.Error("error reading configs from env, config, or flags")
+			return
+		}
+		logger := utilities.NewLogger("info", "team", subdomain)
+		client, err := slack.NewSlackClient(cmd.Context(), browser, profile, subdomain)
 
 		emojis, err := client.ListEmoji()
 		if err != nil {
@@ -68,7 +66,7 @@ var releaseNotesCmd = &cobra.Command{
 		}
 		if !releaseNotesDryRun {
 			logger.Info("sending chanel header message")
-			resp, err := client.PostMessage(header, channel, "", false)
+			resp, err := client.PostMessage(channel, header, nil)
 			if err != nil {
 				logger.Error("unable to post message", "error", err)
 				return
@@ -76,7 +74,7 @@ var releaseNotesCmd = &cobra.Command{
 
 			logger.Info("sending ranks")
 			thread := resp["ts"].(string)
-			if _, err := client.PostMessage(ranks, channel, thread, false); err != nil {
+			if _, err := client.PostMessage(channel, ranks, &thread); err != nil {
 				logger.Error("unable to post ranks to thread", "error", err)
 				return
 			}
@@ -92,15 +90,10 @@ var releaseNotesCmd = &cobra.Command{
 					markdown = message
 				}
 
-				resp, err := client.PostMessage(markdown, channel, thread, false)
+				_, err := client.PostMessage(channel, markdown, &thread)
 				if err != nil {
 					logger.Error("unable to post followup message", "error", err)
 					return
-				}
-
-				if !resp["ok"].(bool) {
-					logger.Info("debug", "page", i, "resp", resp, "len", len(markdown))
-					fmt.Println(markdown)
 				}
 
 			}
@@ -119,7 +112,9 @@ var releaseNotesCmd = &cobra.Command{
 }
 
 func init() {
+	initConfig()
 	rootCmd.AddCommand(releaseNotesCmd)
+	releaseNotesCmd.Flags().StringVarP(&channel, "channel", "c", utilities.ConfigOrEnv("slack", "channel"), "channel to post to")
 	now := time.Now()
 	releaseNotesCmd.Flags().TimeVar(&releaseNotesWindowStart, "start", now.Add(-14*24*time.Hour), []string{time.RFC822}, "start time")
 	releaseNotesCmd.Flags().TimeVar(&releaseNotesWindowEnd, "end", now, []string{time.RFC822}, "end time")

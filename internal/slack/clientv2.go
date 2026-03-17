@@ -1,0 +1,299 @@
+package slack
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/browserutils/kooky"
+	_ "github.com/browserutils/kooky/browser/all"
+	"github.com/erindatkinson/slack-emojinator/internal/utilities"
+)
+
+const (
+	postMessageAPIEndpoint     = "https://slack.com/api/chat.postMessage"
+	listEmojiAPITemplateString = "https://%s.slack.com/api/emoji.adminList"
+	addEmojiAPITemplateString  = "https://%s.slack.com/api/emoji.add"
+)
+
+type Client struct {
+	XOXD      string
+	XOXC      string
+	Subdomain string
+}
+
+func NewSlackClient(ctx context.Context, browser, profile, subdomain string) (*Client, error) {
+	client := &Client{Subdomain: subdomain}
+	if err := client.setXOXDFromCookie(ctx, browser, profile); err != nil {
+		return nil, err
+	}
+
+	if err := client.setXOXCToken(); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func (c *Client) RefreshToken() error {
+	return c.setXOXCToken()
+}
+
+// PostMessage posts a message to the channel specified
+func (c *Client) PostMessage(channel, message string, threadTs *string) (map[string]any, error) {
+	req, err := c.buildMessageRequest(channel, message, threadTs)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("unable to make request"), err)
+
+	}
+
+	data := make(map[string]any)
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("unable to parse response"), err)
+	}
+
+	resp.Body.Close()
+	return data, nil
+}
+
+func (c *Client) ListEmoji() ([]Emoji, error) {
+	logger := utilities.NewLogger("info")
+	emojis := make([]Emoji, 0)
+
+	page := 1
+	for {
+		logger.Info("Downloading list", "page", page)
+		req, err := c.buildListRequest(page)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return []Emoji{}, err
+		}
+
+		data := EmojiList{}
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		if err != nil {
+			return []Emoji{}, err
+		}
+
+		resp.Body.Close()
+
+		if data.Ok {
+			emojis = append(emojis, data.Emoji...)
+			if data.Paging.Page+1 > data.Paging.Pages {
+				return emojis, nil
+			} else {
+				page++
+			}
+		} else {
+			return []Emoji{}, fmt.Errorf("response ok: false: %s", resp.Header["X-Slack-Failure"])
+		}
+	}
+}
+
+func (c *Client) ExportEmoji(emoji Emoji, dir string) error {
+	name, err := parseFile(emoji.URL)
+	if err != nil {
+		return err
+	}
+
+	fp, err := os.Create(filepath.Join(dir, name))
+	if err != nil {
+		return err
+	}
+	defer fp.Close()
+
+	resp, err := http.Get(emoji.URL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("bad request (%d)", resp.StatusCode)
+	}
+
+	fp.ReadFrom(resp.Body)
+	return nil
+}
+
+func (c *Client) ImportEmoji(name, fPath string) error {
+	slog.Info("importing emoji", "name", name)
+	req, err := c.buildImportRequest(name, fPath)
+	if err != nil {
+		return err
+	}
+
+	for attempts := 0; attempts < 3; attempts++ {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retry := resp.Header.Get("Retry-After")
+			seconds, err := strconv.Atoi(retry)
+			if err != nil {
+				// If working behind a proxy, 429 may be returned with
+				// stripped headers, fallback to 30s if no retry-after
+				seconds = 30
+			}
+			time.Sleep(time.Duration(seconds) * time.Second)
+			continue
+		}
+
+		defer resp.Body.Close()
+
+		var data map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		if err != nil {
+			return err
+		}
+		slog.Info("response", "code", resp.StatusCode, "data", data, "name", name, "path", fPath)
+		return nil
+	}
+
+	return fmt.Errorf("attempted 3 times and failed")
+}
+
+//========== Private Methods ==========
+
+// GetXOXDFromCookie gets the long running token from your cookie store
+func (c *Client) setXOXDFromCookie(ctx context.Context, browser, profile string) error {
+	slog.Info("getting cookies")
+	stores := kooky.FindAllCookieStores(ctx)
+	site, _ := url.Parse(fmt.Sprintf("https://%s.slack.com", c.Subdomain))
+	for _, store := range stores {
+		if store.Browser() == browser && store.Profile() == profile {
+			for _, cookie := range store.Cookies(site) {
+				if cookie.Name == "d" {
+					c.XOXD = cookie.Value
+					return nil
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("no cookie found in cookie stores for subdomain")
+}
+
+// GetXOXCToken requests a new xoxc token from slack given your xoxd token
+func (c *Client) setXOXCToken() error {
+	slog.Info("getting xoxc token")
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://%s.slack.com", c.Subdomain), nil)
+	if err != nil {
+		return errors.Join(fmt.Errorf("error building request"), err)
+	}
+
+	req.Header.Set("Cookie", fmt.Sprintf("d=%s", c.XOXD))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return errors.Join(fmt.Errorf("unable to complete request - status_code: %d", resp.StatusCode), err)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return errors.Join(fmt.Errorf("error reading data"), err)
+	}
+
+	r := regexp.MustCompile("(xox[a-zA-Z]-[a-zA-Z0-9-]+)")
+	c.XOXC = r.FindString(string(data))
+	return nil
+}
+
+func (c *Client) buildListRequest(page int) (*http.Request, error) {
+	params := url.Values{}
+	params.Set("query", "")
+	params.Set("page", strconv.Itoa(page))
+	params.Set("count", "1000")
+	params.Set("token", c.XOXC)
+	payload := bytes.NewBufferString(params.Encode())
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf(listEmojiAPITemplateString, c.Subdomain),
+		payload)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	return req, nil
+}
+
+func (c *Client) buildImportRequest(name, fPath string) (*http.Request, error) {
+
+	buf := new(bytes.Buffer)
+	writer := multipart.NewWriter(buf)
+
+	addField(writer, "mode", "data")
+	addField(writer, "name", name)
+	addField(writer, "token", c.XOXC)
+	imgWriter, _ := writer.CreateFormFile("image", filepath.Base(fPath))
+	fp, err := os.Open(fPath)
+	if err != nil {
+		return nil, err
+	}
+	defer fp.Close()
+	io.Copy(imgWriter, fp)
+	writer.Close()
+	contentType := writer.FormDataContentType()
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf(addEmojiAPITemplateString, c.Subdomain), buf)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	req.Header.Set("Content-Type", contentType)
+	return req, nil
+}
+
+func addField(wrapper *multipart.Writer, name, data string) error {
+	writer, err := wrapper.CreateFormField(name)
+	if err != nil {
+		return err
+	}
+	writer.Write([]byte(data))
+	return nil
+}
+
+// buildRequest creates the http post request object for writing a message to a slack channel
+func (c *Client) buildMessageRequest(channel, message string, threadTs *string) (*http.Request, error) {
+	params := url.Values{}
+	params.Set("token", c.XOXC)
+	params.Set("channel", channel)
+	params.Set("as_user", "true")
+	if threadTs != nil {
+		params.Set("thread_ts", *threadTs)
+	}
+	params.Set("markdown_text", message+"\n(This was sent via API)")
+	payload := bytes.NewBufferString(params.Encode())
+
+	req, err := http.NewRequest(
+		http.MethodPost, postMessageAPIEndpoint, payload)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("unable to build request"), err)
+	}
+	c.setHeaders(req)
+	return req, nil
+}
+
+func (c *Client) setHeaders(req *http.Request) {
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Cookie", fmt.Sprintf("d=%s", c.XOXD))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+}

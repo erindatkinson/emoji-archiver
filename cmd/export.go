@@ -4,42 +4,41 @@
 package cmd
 
 import (
+	"log/slog"
 	"os"
 	"slices"
-	"strconv"
 
 	"github.com/erindatkinson/slack-emojinator/internal/cache"
 	"github.com/erindatkinson/slack-emojinator/internal/slack"
 	"github.com/erindatkinson/slack-emojinator/internal/utilities"
 	"github.com/gammazero/workerpool"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
+
+var outputDir string
+var concurrency int
 
 // exportCmd represents the export command
 var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Pull all emoji from a given slack team",
 	Run: func(cmd *cobra.Command, args []string) {
-		outputDir := cmd.Flag("directory").Value.String()
-		team := viper.GetString("team")
-		concurrency, _ := strconv.Atoi(cmd.Flag("concurrency").Value.String())
+		if browser == "" || profile == "" || subdomain == "" {
+			slog.Error("error reading configs from env, config, or flags")
+			return
+		}
 
 		logger := utilities.NewLogger(
 			cmd.Flag("log-level").Value.String(),
-			"team", team, "dir", outputDir)
+			"team", subdomain, "dir", outputDir)
 
-		if err := utilities.CheckEnvs(); err != nil {
-			logger.Error(err.Error())
-			return
-		}
 		logger.Info("creating export directory")
 		os.MkdirAll(outputDir, 0755)
-		client := slack.NewSlackClient(
-			team,
-			viper.GetString("token"),
-			viper.GetString("cookie"),
-		)
+		client, err := slack.NewSlackClient(cmd.Context(), browser, profile, subdomain)
+		if err != nil {
+			logger.Error("unable to create slack client", "error", err)
+			return
+		}
 		logger.Debug("client setup complete")
 
 		logger.Info("retrieving list of current emoji")
@@ -51,6 +50,7 @@ var exportCmd = &cobra.Command{
 		cached, err := cache.ListDownloadedEmojis(outputDir)
 		if err != nil {
 			logger.Error("unable to get cached emojis", "error", err)
+			return
 		}
 
 		wp := workerpool.New(concurrency)
@@ -80,7 +80,7 @@ var exportCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(exportCmd)
-	exportCmd.Flags().StringP("directory", "d", "./export/", "the directory to use to export")
+	exportCmd.Flags().StringVarP(&outputDir, "directory", "d", "./export/", "the directory to use to export")
+	exportCmd.Flags().IntVar(&concurrency, "concurrency", 1, "concurrency to use to download")
 	exportCmd.Flags().String("log-level", "info", "enable debug logging")
-	exportCmd.Flags().IntP("concurrency", "c", 2, "worker concurrency")
 }

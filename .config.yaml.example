@@ -1,0 +1,7 @@
+slack:
+  browser: chrome
+  profile: Your Name
+  # browser: firefox
+  # profile: default-release
+  subdomain: my-slack-team
+  channel: C01234567890
