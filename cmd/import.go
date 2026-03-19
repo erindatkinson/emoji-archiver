@@ -23,6 +23,7 @@ var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Add a collection of emoji to a given slack team",
 	Run: func(cmd *cobra.Command, args []string) {
+		logger := utilities.ContextLogger(cmd.Context())
 		if browser == "" || profile == "" || subdomain == "" {
 			slog.Error("error reading configs from env, config, or flags")
 			return
@@ -31,13 +32,13 @@ var importCmd = &cobra.Command{
 		importDir := path.Join(directory, subdomain)
 		client, err := slack.NewSlackClient(cmd.Context(), browser, profile, subdomain)
 		if err != nil {
-			logger.Error("error creating slack client")
+			logger.Error("error creating slack client", "error", err)
 			return
 		}
 
 		files, err := os.ReadDir(importDir)
 		if err != nil {
-			logger.Error("error reading files")
+			logger.Error("error reading files", "error", err)
 			return
 		}
 		logger.Info("found emojis to import", "count", len(files))

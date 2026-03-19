@@ -17,6 +17,13 @@ var browser, profile, subdomain, channel, directory, logLevel string
 var rootCmd = &cobra.Command{
 	Use:   "slack-emojinator",
 	Short: "A tool to bulk import and export slack emojis",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		logger := utilities.NewLogger(logLevel,
+			"subdomain", subdomain,
+			"root-directory", directory,
+		)
+		cmd.SetContext(utilities.ToContext(cmd.Context(), logger))
+	},
 }
 
 func Execute() {

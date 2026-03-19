@@ -22,14 +22,11 @@ var exportCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Pull all emoji from a given slack team",
 	Run: func(cmd *cobra.Command, args []string) {
+		logger := utilities.ContextLogger(cmd.Context())
 		if browser == "" || profile == "" || subdomain == "" {
-			slog.Error("error reading configs from env, config, or flags")
+			logger.Error("error reading configs from env, config, or flags")
 			return
 		}
-
-		logger := utilities.NewLogger(
-			cmd.Flag("log-level").Value.String(),
-			"team", subdomain, "dir", outputDir)
 
 		logger.Info("creating export directory")
 		exportDir := path.Join(directory, subdomain)
@@ -41,21 +38,21 @@ var exportCmd = &cobra.Command{
 			return
 		}
 		logger.Debug("client setup complete")
-
 		logger.Info("retrieving list of current emoji")
 		currentEmoji, err := client.ListEmoji()
 		if err != nil {
 			logger.Error("error retrieving current emoji list", "error", err)
 			return
 		}
+		logger.Info("listing downloaded emojis from filesystem")
 		cached, err := cache.ListDownloadedEmojis(exportDir)
 		if err != nil {
 			logger.Error("unable to get cached emojis", "error", err)
 			return
 		}
 
+		logger.Info("exporting emojis")
 		wp := workerpool.New(concurrency)
-
 		for _, emoji := range currentEmoji {
 			request := emoji
 			wp.Submit(func() {

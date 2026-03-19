@@ -21,6 +21,7 @@ var docsCmd = &cobra.Command{
 	Use:   "docs",
 	Short: "Generate the docs for a namespace of emojis",
 	Run: func(cmd *cobra.Command, args []string) {
+		logger := utilities.ContextLogger(cmd.Context())
 		emojiDir := path.Join(directory, subdomain)
 		docsDir := path.Join(docsRootDir, subdomain)
 		emojis, err := cache.ListDownloadedEmojis(emojiDir)
@@ -44,5 +45,5 @@ var docsCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(docsCmd)
-	docsCmd.Flags().StringP("dir", "d", "./emojis/", "the root directory to look for emojis in")
+	docsCmd.Flags().StringVar(&docsRootDir, "docs-dir", "docs/", "the root directory to write docs into")
 }
