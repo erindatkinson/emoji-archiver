@@ -72,9 +72,14 @@ var releaseNotesCmd = &cobra.Command{
 				return
 			}
 
+			var thread string = ""
+			if ts, ok := resp["ts"]; ok {
+				thread = ts.(string)
+			}
+
 			logger.Info("sending ranks")
-			thread := resp["ts"].(string)
-			if _, err := client.PostMessage(channel, ranks, &thread); err != nil {
+			_, err = client.PostMessage(channel, ranks, &thread)
+			if err != nil {
 				logger.Error("unable to post ranks to thread", "error", err)
 				return
 			}
@@ -90,12 +95,11 @@ var releaseNotesCmd = &cobra.Command{
 					markdown = message
 				}
 
-				_, err := client.PostMessage(channel, markdown, &thread)
+				_, err = client.PostMessage(channel, markdown, &thread)
 				if err != nil {
 					logger.Error("unable to post followup message", "error", err)
 					return
 				}
-
 			}
 		} else {
 			fmt.Println(header)

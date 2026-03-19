@@ -4,8 +4,8 @@
 package cmd
 
 import (
-	"log/slog"
 	"os"
+	"path"
 	"slices"
 
 	"github.com/erindatkinson/slack-emojinator/internal/cache"
@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var outputDir string
 var concurrency int
 
 // exportCmd represents the export command
@@ -33,7 +32,9 @@ var exportCmd = &cobra.Command{
 			"team", subdomain, "dir", outputDir)
 
 		logger.Info("creating export directory")
-		os.MkdirAll(outputDir, 0755)
+		exportDir := path.Join(directory, subdomain)
+		os.MkdirAll(exportDir, 0755)
+
 		client, err := slack.NewSlackClient(cmd.Context(), browser, profile, subdomain)
 		if err != nil {
 			logger.Error("unable to create slack client", "error", err)
@@ -47,7 +48,7 @@ var exportCmd = &cobra.Command{
 			logger.Error("error retrieving current emoji list", "error", err)
 			return
 		}
-		cached, err := cache.ListDownloadedEmojis(outputDir)
+		cached, err := cache.ListDownloadedEmojis(exportDir)
 		if err != nil {
 			logger.Error("unable to get cached emojis", "error", err)
 			return
@@ -67,7 +68,7 @@ var exportCmd = &cobra.Command{
 				}
 
 				loopLog.Debug("exporting emoji")
-				if err := client.ExportEmoji(request, outputDir); err != nil {
+				if err := client.ExportEmoji(request, exportDir); err != nil {
 					loopLog.Error("error exporting", "error", err)
 				}
 
@@ -80,7 +81,5 @@ var exportCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(exportCmd)
-	exportCmd.Flags().StringVarP(&outputDir, "directory", "d", "./export/", "the directory to use to export")
 	exportCmd.Flags().IntVar(&concurrency, "concurrency", 1, "concurrency to use to download")
-	exportCmd.Flags().String("log-level", "info", "enable debug logging")
 }

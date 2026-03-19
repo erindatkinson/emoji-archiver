@@ -6,6 +6,7 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var importDir string
 var importDryRun bool
 
 // importCmd represents the import command
@@ -28,9 +28,7 @@ var importCmd = &cobra.Command{
 			return
 		}
 
-		logger := utilities.NewLogger(
-			cmd.Flag("log-level").Value.String(),
-			"team", subdomain, "dir", importDir)
+		importDir := path.Join(directory, subdomain)
 		client, err := slack.NewSlackClient(cmd.Context(), browser, profile, subdomain)
 		if err != nil {
 			logger.Error("error creating slack client")
@@ -83,7 +81,5 @@ var importCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().StringVarP(&importDir, "directory", "d", "./import/", "the directory to import from")
-	importCmd.Flags().String("log-level", "info", "enable debug logging")
 	importCmd.Flags().BoolVar(&importDryRun, "dry-run", false, "do a dry run")
 }
