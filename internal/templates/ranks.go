@@ -18,8 +18,8 @@ func RenderRanks(emojis []slack.Emoji) (string, error) {
 	keys := make([]string, 0)
 	maxLen := 0
 	for _, emoji := range emojis {
-		if len(emoji.UserDisplayName) > maxLen {
-			maxLen = len(emoji.UserDisplayName)
+		if len([]rune(emoji.UserDisplayName)) > maxLen {
+			maxLen = len([]rune(emoji.UserDisplayName))
 		}
 
 		if _, ok := rankMap[emoji.UserDisplayName]; ok {
@@ -43,7 +43,7 @@ func RenderRanks(emojis []slack.Emoji) (string, error) {
 	tpl = tpl.Funcs(template.FuncMap{
 		"padding": func(value string) string {
 			var out string
-			for i := 0; i < maxLen-len(value)+1; i++ {
+			for i := 0; i < maxLen-len([]rune(value))+1; i++ {
 				out += " "
 			}
 			return out
